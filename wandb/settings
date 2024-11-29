@@ -1,0 +1,5 @@
+[default]
+entity = snnrl
+project = boltzman
+base_url = https://api.wandb.ai
+
