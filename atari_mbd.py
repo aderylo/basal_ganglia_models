@@ -125,13 +125,13 @@ def test_mbd(args: argparse.Namespace = get_args()) -> None:
         features_only=True,
         output_dim_added_layer=args.hidden_size,
         layer_init=layer_init,
-    )
+    ).to(args.device)
     sampler_net = TrainableBoltzmanSampler(
         feature_net=feature_net,
         action_shape=args.action_shape,
         hidden_sizes=[512],
         device=args.device,
-    )
+    ).to(args.device)
     sampler_optim = torch.optim.Adam(sampler_net.parameters(), lr=args.lr) 
 
     dqn_net = DQN(*args.state_shape, args.action_shape, args.device).to(args.device)
