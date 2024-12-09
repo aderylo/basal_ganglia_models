@@ -49,6 +49,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--recompute-adv", type=int, default=0)
     parser.add_argument("--logdir", type=str, default="log")
     parser.add_argument("--render", type=float, default=0.0)
+    parser.add_argument("--sampler-update-freq", type=int, default=100)
     parser.add_argument(
         "--device",
         type=str,
@@ -147,6 +148,7 @@ def test_mbd(args: argparse.Namespace = get_args()) -> None:
         dqn_optim=dqn_optim,
         sampler_net=sampler_net,
         sampler_optim=sampler_optim,
+        sampler_update_freq=args.sampler_update_freq,
         action_space=env.action_space,
         dqn_params=dqn_params,
     )

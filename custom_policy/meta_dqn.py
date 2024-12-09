@@ -53,6 +53,7 @@ class MBDPolicy(BasePolicy[TMBDTrainingStats], Generic[TMBDTrainingStats]):
         dqn_optim: torch.optim.Optimizer,
         sampler_net: nn.Module | Net,
         sampler_optim: torch.optim.Optimizer,
+        sampler_update_freq: int = 1,
         action_space: gym.spaces.Discrete,
         observation_space: gym.Space | None = None,
         dqn_params: DQNParams,
@@ -69,10 +70,11 @@ class MBDPolicy(BasePolicy[TMBDTrainingStats], Generic[TMBDTrainingStats]):
         self.dqn_optim = dqn_optim
         self.sampler_net = sampler_net
         self.sampler_optim = sampler_optim
+        self.sampler_update_freq = sampler_update_freq
         self.dqn_params = dqn_params
 
         self._target = dqn_params.target_update_freq > 0
-        self._dqn_iter = 0
+        self._iter = 0
         if self._target:
             self.dqn_model_old = deepcopy(self.dqn_net)
             self.dqn_model_old.eval()
@@ -159,7 +161,7 @@ class MBDPolicy(BasePolicy[TMBDTrainingStats], Generic[TMBDTrainingStats]):
             *args: Any,
             **kwargs: Any
     ) -> DQNTrainingStats:
-        if self._target and self._dqn_iter % self.dqn_params.target_update_freq == 0:
+        if self._target and self._iter % self.dqn_params.target_update_freq == 0:
             self.sync_weight()
 
         self.dqn_optim.zero_grad()
@@ -179,7 +181,6 @@ class MBDPolicy(BasePolicy[TMBDTrainingStats], Generic[TMBDTrainingStats]):
         batch.weight = td_error  # prio-buffer
         loss.backward()
         self.dqn_optim.step()
-        self._dqn_iter += 1
 
         return DQNTrainingStats(loss=loss.item())  # type: ignore[return-value]
 
@@ -189,23 +190,27 @@ class MBDPolicy(BasePolicy[TMBDTrainingStats], Generic[TMBDTrainingStats]):
         batch: BatchWithTwoReturnsProtocol,
         batch_size: int | None,
         repeat: int,
+        backward: bool = True,
         *args: Any,
         **kwargs: Any,
     ) -> PGTrainingStats:
         losses = []
         split_batch_size = batch_size or -1
-        for _ in range(repeat):
-            for minibatch in batch.split(split_batch_size, merge_last=True):
-                self.sampler_optim.zero_grad()
-                result = self(minibatch)
-                dist = result.dist
-                act = to_torch_as(minibatch.act, result.act)
-                ret = to_torch(minibatch.episodic_returns, torch.float, result.act.device)
-                log_prob = dist.log_prob(act).reshape(len(ret), -1).transpose(0, 1)
-                loss = -(log_prob * ret).mean()
-                loss.backward()
-                self.sampler_optim.step()
-                losses.append(loss.item())
+
+        with torch.no_grad() if not backward else torch.enable_grad():
+            for _ in range(repeat):
+                for minibatch in batch.split(split_batch_size, merge_last=True):
+                    self.sampler_optim.zero_grad()
+                    result = self(minibatch)
+                    dist = result.dist
+                    act = to_torch_as(minibatch.act, result.act)
+                    ret = to_torch(minibatch.episodic_returns, torch.float, result.act.device)
+                    log_prob = dist.log_prob(act).reshape(len(ret), -1).transpose(0, 1)
+                    loss = -(log_prob * ret).mean()
+                    if backward:
+                        loss.backward()
+                        self.sampler_optim.step()
+                    losses.append(loss.item())
 
         loss_summary_stat = SequenceSummaryStats.from_sequence(losses)
 
@@ -227,8 +232,10 @@ class MBDPolicy(BasePolicy[TMBDTrainingStats], Generic[TMBDTrainingStats]):
         :param batch_size: necessary for policy gradient learning step.
         :param repeat: necessary for policy gradient learning step. 
         """
-        pg_stats = self._pg_learn(batch, batch_size, repeat) 
+        sampler_compute_grad = self._iter % self.sampler_update_freq == 0
+        pg_stats = self._pg_learn(batch, batch_size, repeat, backward=sampler_compute_grad)
         dqn_stats = self._dqn_learn(batch)
+        self._iter += 1
 
         return MBDTrainingStats(
             pg_loss=pg_stats.loss,
