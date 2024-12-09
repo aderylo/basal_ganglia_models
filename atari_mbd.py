@@ -170,7 +170,7 @@ def test_mbd(args: argparse.Namespace = get_args()) -> None:
 
     # log
     now = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
-    args.algo_name = "ppo_icm" if args.icm_lr_scale > 0 else "ppo"
+    args.algo_name = "mbd_icm" if args.icm_lr_scale > 0 else "mbd"
     log_name = os.path.join(args.task, args.algo_name, str(args.seed), now)
     log_path = os.path.join(args.logdir, log_name)
 
